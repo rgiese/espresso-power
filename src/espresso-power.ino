@@ -1,6 +1,7 @@
 #include <WebServer.h>
 
 #include <array>
+#include <chrono>
 
 //
 // Types
@@ -21,6 +22,9 @@ pin_t constexpr c_PowerSensePin = A5;
 
 std::array<PowerSenseState, 8> g_PowerSenseBuffer;
 size_t g_idxPowerSenseBuffer = 0;
+
+PowerState g_LastPowerState;
+unsigned long g_TimeOfLastPowerStateChange;
 
 //
 // Forwards
@@ -47,6 +51,9 @@ void setup() {
   // Configure state
   g_PowerSenseBuffer.fill(PowerSenseState::Unknown);
 
+  g_LastPowerState = PowerState::Unknown;
+  g_TimeOfLastPowerStateChange = millis();
+
   // Configure hardware
   pinMode(c_PowerRelayPin, OUTPUT);
   digitalWrite(c_PowerRelayPin, LOW);
@@ -72,12 +79,21 @@ void loop() {
   if (timeSinceLastMeasurement >= 100) {
     s_LastMeasurementTime = currentTime;
 
+    // Update measurements
     PowerSenseState const latestPowerSenseState = readPowerSensePin();
 
     g_PowerSenseBuffer[g_idxPowerSenseBuffer] = latestPowerSenseState;
 
     g_idxPowerSenseBuffer =
         (g_idxPowerSenseBuffer + 1) % g_PowerSenseBuffer.size();
+
+    // Check for changes
+    PowerState const powerState = evaluatePowerSenseHistory();
+
+    if (powerState != g_LastPowerState) {
+      g_LastPowerState = powerState;
+      g_TimeOfLastPowerStateChange = millis();
+    }
   }
 
   // Process HTTPD
@@ -171,6 +187,9 @@ void buildPage(WebServer &server, bool const fIsWorking) {
   bool const canTurnOff =
       (powerState == PowerState::On) || (powerState == PowerState::Heating);
 
+  std::chrono::milliseconds const timeSinceLastPowerStateChange(
+      millis() - g_TimeOfLastPowerStateChange);
+
   server.println("<html>");
 
   // Head
@@ -207,6 +226,65 @@ void buildPage(WebServer &server, bool const fIsWorking) {
   server.printlnf("    <span><img class=\"w4\" src=\"grumpyBird.svg\" />'s "
                   "espresso machine is </span><span class=\"b\">%s</span>",
                   fIsWorking ? "working..." : powerStateToString(powerState));
+
+  if (!fIsWorking) {
+    // We should really do this with MomentJS on the client but whatever.
+    using namespace std::chrono;
+    using days = duration<int, std::ratio<86400>>;
+
+    auto remainingTime = timeSinceLastPowerStateChange;
+
+    auto cDays = duration_cast<days>(remainingTime);
+    remainingTime -= cDays;
+
+    auto cHours = duration_cast<hours>(remainingTime);
+    remainingTime -= cHours;
+
+    auto cMinutes = duration_cast<minutes>(remainingTime);
+    remainingTime -= cMinutes;
+
+    auto cSeconds = duration_cast<seconds>(remainingTime);
+
+    auto const printValueWithUnits =
+        [&server](int const value, char const *const unitName,
+                  size_t const cPrecedingUnits, size_t const cRemainingUnits) {
+          if (value > 0) {
+            server.printf("%d %s%s", value, unitName, value > 1 ? "s" : "");
+
+            if (cRemainingUnits == 1) {
+              if (cPrecedingUnits > 1) {
+                server.print(",");
+              }
+
+              server.print(" and ");
+            } else if (cRemainingUnits > 1) {
+              server.print(", ");
+            }
+          }
+        };
+
+    server.println("    <span class=\"f1\">and has been so for ");
+
+    printValueWithUnits(cDays.count(), "day", 0,
+                        !!(cHours.count()) + !!(cMinutes.count()) +
+                            !!(cSeconds.count()));
+
+    printValueWithUnits(cHours.count(), "hour", !!(cHours.count()),
+                        !!(cMinutes.count()) + !!(cSeconds.count()));
+
+    printValueWithUnits(cMinutes.count(), "minute",
+                        !!(cHours.count()) + !!(cMinutes.count()),
+                        !!(cSeconds.count()));
+
+    printValueWithUnits(
+        cSeconds.count(), "second",
+        !!(cHours.count()) + !!(cMinutes.count()) + !!(cSeconds.count()), 0);
+
+    server.println(".");
+
+    server.println("</span>");
+  }
+
   server.println("  </div>");
 
   // Body > On button
