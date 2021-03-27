@@ -226,6 +226,7 @@ void buildPage(WebServer &server, bool const fIsWorking) {
   server.printlnf("    <span><img class=\"w4\" src=\"grumpyBird.svg\" />'s "
                   "espresso machine is </span><span class=\"b\">%s</span>",
                   fIsWorking ? "working..." : powerStateToString(powerState));
+  server.println("  </div>");
 
   if (!fIsWorking) {
     // We should really do this with MomentJS on the client but whatever.
@@ -263,7 +264,7 @@ void buildPage(WebServer &server, bool const fIsWorking) {
           }
         };
 
-    server.println("    <span class=\"f1\">and has been so for ");
+    server.println("  <div class=\"w-100 pa3 f1\">and has been so for ");
 
     printValueWithUnits(cDays.count(), "day", 0,
                         !!(cHours.count()) + !!(cMinutes.count()) +
@@ -282,10 +283,8 @@ void buildPage(WebServer &server, bool const fIsWorking) {
 
     server.println(".");
 
-    server.println("</span>");
+    server.println("  </div>");
   }
-
-  server.println("  </div>");
 
   // Body > On button
   server.println("  <div class=\"w-100 pa4\">");
